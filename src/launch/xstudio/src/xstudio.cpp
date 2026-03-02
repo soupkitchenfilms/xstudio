@@ -194,7 +194,7 @@ void xstudioQtMessageHandler(
     }
 }
 
-void execute_xstudio_ui(
+int execute_xstudio_ui(
     const bool disble_vsync,
     const float ui_scale_factor,
     const bool silence_qt_warnings,
@@ -258,7 +258,7 @@ void execute_xstudio_ui(
         QOpenGLContext ctx;
         if (!ctx.create()) {
             spdlog::critical("Failed to create OpenGL context. No GPU driver available.");
-            return;
+            return EXIT_FAILURE;
         }
         QOffscreenSurface surface;
         surface.setFormat(ctx.format());
@@ -294,7 +294,7 @@ void execute_xstudio_ui(
                 vendor ? vendor : "unknown",
                 renderer ? renderer : "unknown");
             ctx.doneCurrent();
-            return;
+            return EXIT_FAILURE;
         }
 
         ctx.doneCurrent();
@@ -337,9 +337,10 @@ void execute_xstudio_ui(
             qputenv("QT_SCALE_FACTOR", previous_factor);
     }
 
-    app.exec();
+    const int app_exit_code = app.exec();
 
     spdlog::get("xstudio")->sinks().pop_back();
+    return app_exit_code;
 }
 
 // CAF actor class that enacts loading media from command line asynchronously.
@@ -1180,12 +1181,17 @@ int main(int argc, char **argv) {
         } else {
 
             // Run the QApplication and launch UI
-            execute_xstudio_ui(
+            const int ui_exit_code = execute_xstudio_ui(
                 l.actions["disable_vsync"],
                 l.prefs.get("/ui/qml/global_ui_scale_factor").value("value", 1.0f),
                 l.actions["silence_qt_warnings"],
                 argc,
                 argv);
+
+            if (ui_exit_code != 0) {
+                throw std::runtime_error(
+                    fmt::format("UI exited during startup with code {}", ui_exit_code));
+            }
 
             // save state.. BUT NOT WHEN user_prefs_off
             if (not l.actions.value("user_prefs_off", false)) {

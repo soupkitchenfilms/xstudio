@@ -60,16 +60,16 @@ Item{id: actionDiv
 
         Repeater {
             model: dockables
-            XsPrimaryButton{
+            XsPrimaryButton {
+
                 Layout.preferredWidth: 40
                 Layout.preferredHeight: parent.height
-                imgSrc: icon_path
-                text: title
+                imgSrc: icon_path ? icon_path : ""
                 isActive: visible_doc_widgets.indexOf(title) != -1
                 //enabled: button_enabled
                 onClicked: {
                     var isHidden = isActive
-                    toggle_dockable_widget(title)
+                    toggle_dockable_widget(title, left_right_dock_widget_qml_code != undefined)
                     // set the 'activated' role data. This will send a message
                     // to the backend Module that the dockable widget has been
                     // either hidden or shown
@@ -95,9 +95,20 @@ Item{id: actionDiv
                     if (typeof userData == "object" && typeof userData.context == "string") {
                         if (userData.context == view.name) {
                             var isHidden = isActive
-                            toggle_dockable_widget(title)
+                            toggle_dockable_widget(title, left_right_dock_widget_qml_code != undefined)
                             activated = isHidden ? 0 : 1
                         }
+                    }
+                }
+
+                // Here if the 'qml_code' role data is provided this means the plugin wants us to 
+                // create a custom widget for the shelf with the provided qml code. This custom
+                // widget must position itself in the parent button
+                property var dynamic_widget: null
+                property var qml_code_: qml_code
+                onQml_code_Changed: {
+                    if (qml_code != undefined && qml_code != "") {
+                        dynamic_widget = Qt.createQmlObject(qml_code, this)
                     }
                 }
 
