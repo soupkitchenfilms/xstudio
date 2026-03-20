@@ -116,10 +116,12 @@
         "USE_SANITIZER": "address"
       }
     },
-    { 
+    {
       "name": "linux-base",
       "inherits": "default",
+      "generator": "Unix Makefiles",
       "cacheVariables": {
+        "VCPKG_OVERLAY_TRIPLETS" : "${sourceDir}/cmake/vcpkg_triplets",
         "VCPKG_TARGET_TRIPLET": "x64-xstudio-linux"
       }
     },
