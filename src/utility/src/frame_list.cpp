@@ -259,6 +259,11 @@ xstudio::utility::frame_groups_from_sequence_spec(const caf::uri &from_path) {
 
     try {
         std::string path = uri_to_posix_path(from_path);
+        // SKF patch 2026-07-17: heal legacy '{:00d}'/'{:0d}' patterns —
+        // fmt rejects zero width, one throw emptied the whole FrameList
+        // (see matching heal in MediaReference::uri_from_frame).
+        static const std::regex broken_zero_pad(R"(\{:0?0d\})", std::regex::optimize);
+        path = std::regex_replace(path, broken_zero_pad, "{:01d}");
         const std::regex spec_re("\\{[^}]+\\}");
         const std::regex path_re("^" + std::regex_replace(path, spec_re, "([0-9-]+)") + "$");
 #ifdef _WIN32

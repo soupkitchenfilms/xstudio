@@ -219,10 +219,15 @@ std::optional<caf::uri> MediaReference::uri_from_frame(const int sequence_frame)
         return uri_;
 
     try {
-        auto uri_str =
-            uri_encode(fmt::format(fmt::runtime(uri_decode(to_string(uri_))), sequence_frame));
+        // SKF patch 2026-07-17: heal legacy '{:00d}'/'{:0d}' patterns (saved
+        // by the old scanner) — fmt rejects zero width, so every frame of
+        // such media failed to resolve. Treat as unpadded.
+        static const std::regex broken_zero_pad(R"(\{:0?0d\})", std::regex::optimize);
+        auto pattern = std::regex_replace(
+            uri_decode(to_string(uri_)), broken_zero_pad, "{:01d}");
 
-        auto _uri = caf::make_uri(uri_str);
+        auto uri_str = uri_encode(fmt::format(fmt::runtime(pattern), sequence_frame));
+        auto _uri    = caf::make_uri(uri_str);
         if (_uri)
             return *_uri;
         else

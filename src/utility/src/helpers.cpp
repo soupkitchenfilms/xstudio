@@ -658,6 +658,54 @@ std::vector<caf::uri> xstudio::utility::uri_subfolders(const caf::uri parent_uri
     return result;
 }
 
+namespace {
+// SKF patch 2026-07-17: a single frame of an image sequence expands to the
+// whole on-disk sequence (upstream returns the bare file -> loads a still).
+// Scans the file's directory, collapses it into sequences, and returns the
+// sequence containing this frame. Non-sequence files (movies, lone stills,
+// unnumbered names) fall back to the bare, frameless item.
+std::vector<std::pair<caf::uri, xstudio::utility::FrameList>>
+expand_frame_to_sequence(const fs::path &p, const std::string &path) {
+    using namespace xstudio::utility;
+    std::vector<std::pair<caf::uri, FrameList>> items;
+    try {
+        std::vector<std::string> files;
+        for (const auto &entry : fs::directory_iterator(p.parent_path())) {
+            if (fs::is_regular_file(entry))
+                files.push_back(entry.path());
+        }
+        for (auto &item : uri_from_file_list(files)) {
+            if (item.second.empty())
+                continue;
+            // pattern looks like /dir/name.{:04d}.ext — match by affixes
+            const auto pat = uri_to_posix_path(item.first);
+            const auto b   = pat.find("{:0");
+            const auto e   = pat.find("d}", b);
+            if (b == std::string::npos or e == std::string::npos)
+                continue;
+            const auto prefix = pat.substr(0, b);
+            const auto suffix = pat.substr(e + 2);
+            if (path.size() <= prefix.size() + suffix.size() or
+                path.compare(0, prefix.size(), prefix) != 0 or
+                path.compare(path.size() - suffix.size(), suffix.size(), suffix) != 0)
+                continue;
+            const auto frame_str =
+                path.substr(prefix.size(), path.size() - prefix.size() - suffix.size());
+            if (not frame_str.empty() and
+                std::all_of(frame_str.begin(), frame_str.end(), ::isdigit)) {
+                items.emplace_back(item);
+                break;
+            }
+        }
+    } catch (const std::exception &err) {
+        spdlog::warn("{} {}", __PRETTY_FUNCTION__, err.what());
+    }
+    if (items.empty())
+        items.emplace_back(std::make_pair(posix_path_to_uri(path), FrameList()));
+    return items;
+}
+} // namespace
+
 std::vector<std::pair<caf::uri, FrameList>>
 xstudio::utility::scan_posix_path(const std::string &path, const int depth) {
     std::vector<std::pair<caf::uri, FrameList>> items;
@@ -702,7 +750,8 @@ xstudio::utility::scan_posix_path(const std::string &path, const int depth) {
                 spdlog::warn("{} {}", __PRETTY_FUNCTION__, e.what());
             }
         } else if (fs::is_regular_file(p, ec)) {
-            items.emplace_back(std::make_pair(posix_path_to_uri(path), FrameList()));
+            // SKF patch: expand to the containing image sequence (see above)
+            items = expand_frame_to_sequence(p, path);
         } else {
 
             FrameList fl;
