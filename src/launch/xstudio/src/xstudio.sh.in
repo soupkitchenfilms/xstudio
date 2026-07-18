@@ -1,5 +1,10 @@
 #!/bin/bash
 
+# SKF patch 2026-07-17: self-contained launch — source the install's env
+# (upstream hardcodes a DNEG dev's Qt path and finds nothing). Lives in
+# xstudio.sh.in so cmake --install keeps it.
+[ -f /opt/xstudio/xstudio_env.sh ] && source /opt/xstudio/xstudio_env.sh
+
 export QML_IMPORT_TRACE=0
 export QML_XHR_ALLOW_FILE_READ=1
 # if root isn't set
@@ -17,7 +22,7 @@ then
 	fi
 fi
 
-xstudio_desktop_integration
+"$(dirname -- "${BASH_SOURCE[0]}")/xstudio_desktop_integration" 2>/dev/null || true
 
 SCRIPT_DIR=$( cd -- "$( dirname -- "${BASH_SOURCE[0]}" )" &> /dev/null && pwd )
 
