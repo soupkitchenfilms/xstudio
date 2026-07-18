@@ -161,7 +161,13 @@ struct DefaultSequenceHelper {
         Sequence seq;
         time_t max_t = 0;
 
-        seq.name_ = head_ + "%0" + std::to_string(pad_) + "d" + tail_;
+        // SKF patch 2026-07-17: pad 0 ("unknown padding") used to emit %00d
+        // -> '{:00d}', which fmt::format REJECTS (zero width) — media counted
+        // frames but every uri_from_frame failed. %01d formats any frame
+        // unpadded and round-trips.
+        seq.name_ = head_ +
+                    (pad_ ? "%0" + std::to_string(pad_) + "d" : std::string("%01d")) +
+                    tail_;
 
         seq.count_         = frames_.size();
         seq.uid_           = 0;
