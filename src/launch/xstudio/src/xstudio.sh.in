@@ -1,9 +1,12 @@
 #!/bin/bash
 
-# SKF patch 2026-07-17: self-contained launch — source the install's env
-# (upstream hardcodes a DNEG dev's Qt path and finds nothing). Lives in
+# SKF patch 2026-07-17 (rev 2026-07-19): self-contained launch — source the
+# install's OWN env file, found relative to this script so side-by-side
+# installs (/opt/xstudio, /opt/xstudio-1.3.0, ...) never cross-contaminate.
+# (Upstream hardcodes a DNEG dev's Qt path and finds nothing.) Lives in
 # xstudio.sh.in so cmake --install keeps it.
-[ -f /opt/xstudio/xstudio_env.sh ] && source /opt/xstudio/xstudio_env.sh
+_XS_PREFIX="$( cd -- "$( dirname -- "${BASH_SOURCE[0]}" )/.." &> /dev/null && pwd )"
+[ -f "${_XS_PREFIX}/xstudio_env.sh" ] && source "${_XS_PREFIX}/xstudio_env.sh"
 
 export QML_IMPORT_TRACE=0
 export QML_XHR_ALLOW_FILE_READ=1
