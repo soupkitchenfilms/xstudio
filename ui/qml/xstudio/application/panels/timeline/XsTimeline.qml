@@ -1541,7 +1541,7 @@ Rectangle {
             id: ma
             anchors.fill: parent
             hoverEnabled: true
-            acceptedButtons: Qt.LeftButton | Qt.RightButton
+            acceptedButtons: Qt.LeftButton | Qt.RightButton | Qt.MiddleButton
             propagateComposedEvents: true
             // preventStealing: true
 
@@ -1638,7 +1638,14 @@ Rectangle {
             }
 
             function mousePressed(button, mouseX, mouseY, modifiers, pressed=false) {
-                if(button == Qt.RightButton) {
+                if(button == Qt.MiddleButton) {
+                    // middle-drag pans the timeline, same as hold-key scrolling mode
+                    if(pressed) {
+                        isScrolling = true
+                        initialValue = list_view.itemAtIndex(0).currentPosition()
+                        initialPosition = Qt.point(mouseX, mouseY)
+                    }
+                } else if(button == Qt.RightButton) {
                     if(editMode != "Select")
                         adjustSelection(button, mouseX, mouseY, modifiers)
 
@@ -1709,7 +1716,10 @@ Rectangle {
                 }
             }
 
-            onDoubleClicked: doubleTapped()
+            onDoubleClicked: mouse => {
+                if(mouse.button == Qt.LeftButton)
+                    doubleTapped()
+            }
 
             onReleased: mouse => {
                 isScaling = false
