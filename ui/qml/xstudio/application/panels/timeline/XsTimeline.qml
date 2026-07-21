@@ -1388,10 +1388,12 @@ Rectangle {
         componentName: "Timeline"
     }
 
+    // SKF: stock bindings were Alt+DOWN / Alt+UP — remapped to Ctrl+Alt so
+    // Alt+Up/Down are free for Soupkitchen "Version Up/Down" (Nuke parity).
     XsHotkey {
         id: expand_both_hotkey
         context: hotkey_area_id
-        sequence:  "Alt+DOWN"
+        sequence:  "Ctrl+Alt+DOWN"
         name: "Expand Selection"
         description: "Expand Selection"
         onActivated: updateItemSelectionHorizontal(1, 1)
@@ -1401,7 +1403,7 @@ Rectangle {
     XsHotkey {
         id: contract_both_hotkey
         context: hotkey_area_id
-        sequence:  "Alt+UP"
+        sequence:  "Ctrl+Alt+UP"
         name: "Contract Selection"
         description: "Contract Clip Selection"
         onActivated: updateItemSelectionHorizontal(-1, -1)
