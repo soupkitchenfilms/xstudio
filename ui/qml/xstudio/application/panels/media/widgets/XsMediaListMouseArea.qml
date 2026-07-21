@@ -5,13 +5,23 @@ MouseArea {
     id: mouseArea
     anchors.fill: parent
     propagateComposedEvents: true
-    acceptedButtons: Qt.LeftButton | Qt.RightButton
+    acceptedButtons: Qt.LeftButton | Qt.RightButton | Qt.MiddleButton
     hoverEnabled: true
     property bool singleSelect: false
 
+    // middle-drag scrolls the list/grid
+    property real panStartContentY: 0
+    property point panStartPos: Qt.point(0, 0)
+    cursorShape: pressed && pressedButtons == Qt.MiddleButton ? Qt.ClosedHandCursor : Qt.ArrowCursor
+
     onPressed: (mouse)=> {
 
-        if (mouse.button == Qt.RightButton) {
+        if (mouse.button == Qt.MiddleButton) {
+
+            panStartContentY = contentY
+            panStartPos = Qt.point(mouse.x, mouse.y)
+
+        } else if (mouse.button == Qt.RightButton) {
 
             showContextMenu(mouse.x, mouse.y, mouseArea)
 
@@ -76,7 +86,11 @@ MouseArea {
     }
 
     onPositionChanged: (mouse)=> {
-        if (pressed && mouse.buttons == Qt.LeftButton && mediaSelectionModel.selectedIndexes.length) {
+        if (pressed && mouse.buttons == Qt.MiddleButton) {
+            let maxY = mediaList.originY + Math.max(0, mediaList.contentHeight - mediaList.height)
+            contentY = Math.max(mediaList.originY,
+                Math.min(maxY, panStartContentY - (mouse.y - panStartPos.y)))
+        } else if (pressed && mouse.buttons == Qt.LeftButton && mediaSelectionModel.selectedIndexes.length) {
             interactive = false
             drag_drop_handler.doDrag(mouse.x, mouse.y)
         }
@@ -86,7 +100,7 @@ MouseArea {
 
         helpers.restoreOverrideCursor()
 
-        if (mouse.button == Qt.RightButton) return;
+        if (mouse.button == Qt.MiddleButton || mouse.button == Qt.RightButton) return;
 
         interactive = true
         if (underMouseItem && singleSelect && !drag_drop_handler.dragging) {
@@ -96,7 +110,8 @@ MouseArea {
 
     }
 
-    onDoubleClicked: {
+    onDoubleClicked: (mouse)=> {
+        if (mouse.button != Qt.LeftButton) return;
         if (underMouseItem) {
             underMouseItem.exclusiveSelect()
             // this sets the *viewed* playlist to match the playlist that this
