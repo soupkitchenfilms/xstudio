@@ -473,9 +473,17 @@ utility::Uuid StandardPlugin::create_bookmark_on_frame(
     scoped_actor sys{system()};
     try {
 
-        auto media_source = caf::actor_cast<caf::actor>(frame_details.media_source_addr());
-        auto media =
-            utility::request_receive<caf::actor>(*sys, media_source, utility::parent_atom_v);
+        // Resolve the media actor directly from the frame's media address —
+        // the media source address can be stale (e.g. sources swapped since
+        // this frame went on screen) while the media item itself persists.
+        auto media = caf::actor_cast<caf::actor>(frame_details.media_addr());
+        if (!media) {
+            auto media_source =
+                caf::actor_cast<caf::actor>(frame_details.media_source_addr());
+            if (media_source)
+                media = utility::request_receive<caf::actor>(
+                    *sys, media_source, utility::parent_atom_v);
+        }
 
         if (media) {
 
@@ -521,6 +529,11 @@ utility::Uuid StandardPlugin::create_bookmark_on_frame(
                 *sys, new_bookmark.actor(), bookmark::bookmark_detail_atom_v, bmd);
 
             result = new_bookmark.uuid();
+        } else {
+            spdlog::warn(
+                "{} could not resolve media actor for bookmark creation "
+                "(stale media reference on frame?)",
+                __PRETTY_FUNCTION__);
         }
 
     } catch (std::exception &e) {
