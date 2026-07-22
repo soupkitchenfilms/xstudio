@@ -1357,7 +1357,13 @@ void AnnotationsCore::make_bookmark_for_annotations(
     detail.category_ = note_category_->value();
     detail.colour_   = note_colour_->value();
 
-    create_bookmark_on_frame(frame_id, note_name, detail, false);
+    const auto made = create_bookmark_on_frame(frame_id, note_name, detail, false);
+    if (made.is_null()) {
+        spdlog::warn(
+            "AnnotationsCore: failed to create bookmark {} for annotation — "
+            "strokes on this frame will NOT be saved",
+            to_string(bm_id));
+    }
 }
 
 namespace xstudio::ui::viewport {
