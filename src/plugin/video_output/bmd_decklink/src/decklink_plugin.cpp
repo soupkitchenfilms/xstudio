@@ -253,6 +253,11 @@ void BMDecklinkPlugin::attribute_changed(const utility::Uuid &attribute_uuid, co
             set_pc_audio_muting();
         } else if (attribute_uuid == sdi_output_is_running_->uuid()) {
             set_pc_audio_muting();
+            // Re-evaluate 'Auto PQ' against the currently selected OCIO
+            // display — otherwise it is only computed at startup and when
+            // the HDR settings themselves change, so switching the SDI
+            // output's OCIO Display never updates the HDR metadata.
+            set_hdr_mode_and_metadata();
         } else if (attribute_uuid == hdr_presets_->uuid()) {
 
             if (hdr_presets_data_.contains(hdr_presets_->value())) {

@@ -75,9 +75,9 @@
 			},
 			"ocio_display_hdr_match_string": {
 				"path": "/plugin/decklink/ocio_display_hdr_match_string",
-				"default_value": "hdr",
-				"description": "If this string is found in the ocio display for the SDI output, HDR PQ mode is automatically enabled",
-				"value": "hdr",
+				"default_value": "pq",
+				"description": "If this string is found in the ocio display for the SDI output, HDR PQ mode is automatically enabled. 'pq' matches ACES display names like 'Rec.2100-PQ - Display' (the stock 'hdr' matched nothing in ACES configs).",
+				"value": "pq",
 				"datatype": "string",
 				"context": ["PLUGIN"]
 			},
