@@ -123,7 +123,8 @@ class OCIOColourPipeline : public ColourPipeline {
   private:
     std::string view_for_source(
         const utility::JsonStore &src_colour_mgmt_metadata,
-        const bool check_shared_settings = true) const;
+        const bool check_shared_settings = true,
+        const std::string &display = std::string()) const;
 
     void stored_per_config_display_view(
         const utility::JsonStore &src_colour_mgmt_metadata,

@@ -660,7 +660,8 @@ void OCIOColourPipeline::connect_to_viewport(
 
 std::string OCIOColourPipeline::view_for_source(
     const utility::JsonStore &src_colour_mgmt_metadata,
-    const bool check_shared_settings) const {
+    const bool check_shared_settings,
+    const std::string &display) const {
 
     const std::string untonemapped_view =
         src_colour_mgmt_metadata.get_or("untonemapped_view", std::string(""));
@@ -685,6 +686,17 @@ std::string OCIOColourPipeline::view_for_source(
         view = !_view.empty() ? _view : m_engine_.default_view(src_colour_mgmt_metadata);
     } else {
         view = view_->value();
+    }
+
+    // The candidate view (automatic_view, override_view or shared settings)
+    // may not exist under the display it will be paired with — OCIO then
+    // fails DisplayViewTransform ("Display color space name is unspecified")
+    // and the image is shown un-managed. Fall back to the display's own
+    // default view instead.
+    const std::string paired_display = display.empty() ? display_->value() : display;
+    if (!paired_display.empty() && !view.empty() &&
+        !m_engine_.has_view(src_colour_mgmt_metadata, view, paired_display)) {
+        view = m_engine_.default_view(src_colour_mgmt_metadata, paired_display);
     }
 
     return view;
@@ -836,7 +848,7 @@ utility::JsonStore OCIOColourPipeline::get_display_and_view_options_for_media(
 
     if (std::find(display_views[display].begin(), display_views[display].end(), view) ==
         display_views[display].end()) {
-        view = view_for_source(src_colour_mgmt_metadata);
+        view = view_for_source(src_colour_mgmt_metadata, true, display);
     }
 
 
@@ -890,7 +902,7 @@ void OCIOColourPipeline::populate_ui(const utility::JsonStore &src_colour_mgmt_m
 
         if (std::find(display_views_[display].begin(), display_views_[display].end(), view) ==
             display_views_[display].end()) {
-            view = view_for_source(src_colour_mgmt_metadata);
+            view = view_for_source(src_colour_mgmt_metadata, true, display);
         }
 
         display_->set_role_data(module::Attribute::StringChoices, displays, false);
@@ -917,9 +929,19 @@ void OCIOColourPipeline::update_views(const std::string &new_display) {
     const std::vector<std::string> &new_views = display_views_[new_display];
     view_->set_role_data(module::Attribute::StringChoices, new_views, false);
 
-    // Reset the view if no longer available under the new display
+    // Reset the view if no longer available under the new display.
+    // Prefer the automatic view when the new display supports it, otherwise
+    // use the new display's own default view — automatic_view() returns the
+    // default view of the config's DEFAULT display, which may not exist
+    // under new_display and would break the DisplayViewTransform.
     if (std::find(new_views.begin(), new_views.end(), view_->value()) == new_views.end()) {
-        view_->set_value(m_engine_.automatic_view(current_source_colour_mgmt_metadata_));
+        std::string new_view =
+            m_engine_.automatic_view(current_source_colour_mgmt_metadata_);
+        if (std::find(new_views.begin(), new_views.end(), new_view) == new_views.end()) {
+            new_view =
+                m_engine_.default_view(current_source_colour_mgmt_metadata_, new_display);
+        }
+        view_->set_value(new_view);
     }
 }
 
