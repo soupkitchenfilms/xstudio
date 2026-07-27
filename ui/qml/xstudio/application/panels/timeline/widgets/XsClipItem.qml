@@ -30,7 +30,9 @@ XsGradientRectangle {
 	property string name
 	property int dragValue: 0
 	property color primaryColor: defaultClip
-	property var realColor: Qt.tint(timelineBackground, helpers.saturate(helpers.alphate(primaryColor, 0.3), 0.3))
+	// Flagged clips keep their TRUE flag colour (Kitsu status colours must
+	// match the Kitsu UI); only unflagged clips get the stock muted blend.
+	property var realColor: Qt.colorEqual(primaryColor, defaultClip) ? Qt.tint(timelineBackground, helpers.saturate(helpers.alphate(primaryColor, 0.3), 0.3)) : primaryColor
     property bool isMoving: false
     property bool isCopying: false
     property color mediaFlagColour: "transparent"
