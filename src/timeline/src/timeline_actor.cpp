@@ -11,6 +11,7 @@
 #include <opentimelineio/externalReference.h>
 #include <opentimelineio/imageSequenceReference.h>
 #include <opentimelineio/deserialization.h>
+#include <opentimelineio/transition.h>
 
 #include "xstudio/atoms.hpp"
 #include "xstudio/bookmark/bookmark_actor.hpp"
@@ -570,6 +571,20 @@ void process_item(
                 auto ometadata = nlohmann::json::parse(ii->to_json_string(&err, {}, 0));
                 if (ometadata.count("metadata"))
                     metadata = JsonStore(ometadata.at("metadata"));
+                // SKF 0019: clip effects (LinearTimeWarp, FreezeFrame, editorial
+                // transform effects from an AAF) used to be discarded with the
+                // rest of the OTIO body. Keep them on the clip's props so conform
+                // tools can see what editorial did, even though the timeline
+                // cannot play them yet.
+                if (ometadata.count("effects") and ometadata.at("effects").is_array() and
+                    not ometadata.at("effects").empty()) {
+                    metadata["otio_effects"] = ometadata.at("effects");
+                    spdlog::warn(
+                        "OTIO import: clip '{}' carries {} effect(s) the timeline will not "
+                        "apply (kept in clip props as otio_effects)",
+                        ii->name(),
+                        ometadata.at("effects").size());
+                }
 
                 if (metadata.contains(fcp_locked_path) and
                     metadata.at(fcp_locked_path).get<std::string>() == "TRUE")
@@ -752,6 +767,21 @@ void process_item(
                 path,
                 media_lookup,
                 timeline_rate);
+        } else if (auto tr = dynamic_cast<otio::Transition *>(&(*i))) {
+            // SKF 0019: transitions have no timeline item type; they used to fall
+            // off the end of this chain SILENTLY. Say so, per item.
+            spdlog::warn(
+                "OTIO import: DROPPED transition '{}' ({}) in {:.3f}s / out {:.3f}s — xStudio "
+                "has no transition item; the cut plays hard",
+                tr->name(),
+                tr->transition_type(),
+                tr->in_offset().to_seconds(),
+                tr->out_offset().to_seconds());
+        } else {
+            spdlog::warn(
+                "OTIO import: dropped unsupported composable '{}' ({})",
+                i->name(),
+                i->schema_name());
         }
     }
 }
