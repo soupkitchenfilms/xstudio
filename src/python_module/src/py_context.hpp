@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 #pragma once
 
+#include <mutex>
 #include <caf/all.hpp>
 #include <caf/config.hpp>
 #include <caf/io/all.hpp>
@@ -110,6 +111,7 @@ class py_context : public py_config {
 
     caf::actor message_callback_handler_actor_;
     std::map<xstudio::utility::Uuid, py::function> message_callback_funcs_;
+    std::mutex message_callback_mutex_;   // SKF 0017: guards the map above
     std::map<xstudio::utility::Uuid, py::object> plugin_registry_;
 };
 } // namespace caf::python
