@@ -622,25 +622,26 @@ Item{
                     onActivated: (menuContext) =>  conformSelectionTimeline(text, menuContext.theTimeline.timelineSelection.selectedIndexes)
                 }
 
-                // XsMenuModelItem {
-                //     text: nameRole
-                //     menuItemType: "button"
-                //     menuPath: "Auto-Conform Around"
-                //     menuItemPosition: index
-                //     menuModelName: "timeline_clip_menu_"
-                //     onActivated: (menuContext) =>  {
-                //         let items = [].concat(menuContext.theTimeline.timelineSelection.selectedIndexes)
-                //         let newitems = []
-                //         for(let i = 0; i < items.length; i++) {
-                //             let expanded = theSessionData.modifyItemSelectionHorizontal([items[i]], 1, 1)
-                //             newitems = newitems.concat(
-                //                 expanded.filter(value => !newitems.includes(value))
-                //             )
-                //         }
+                // SKF 0019: re-enabled; backed by /core/conform/conform_sibling_count
+                XsMenuModelItem {
+                    text: nameRole
+                    menuItemType: "button"
+                    menuPath: "Auto-Conform Around"
+                    menuItemPosition: index
+                    menuModelName: "timeline_clip_menu_"
+                    onActivated: (menuContext) =>  {
+                        let items = [].concat(menuContext.theTimeline.timelineSelection.selectedIndexes)
+                        let newitems = []
+                        for(let i = 0; i < items.length; i++) {
+                            let expanded = theSessionData.modifyItemSelectionHorizontal([items[i]], 1, 1)
+                            newitems = newitems.concat(
+                                expanded.filter(value => !newitems.includes(value))
+                            )
+                        }
 
-                //         conformSelectionTimeline(text, newitems)
-                //     }
-                // }
+                        conformSelectionTimeline(text, newitems)
+                    }
+                }
 
                 XsMenuModelItem {
                     text: nameRole

@@ -247,7 +247,28 @@ ViewportLayoutPlugin::python_layout_data_to_ours(const utility::JsonStore &pytho
         if (python_data.contains("transforms")) {
             if (python_data["transforms"].is_array()) {
                 for (const auto &v : python_data["transforms"]) {
-                    if (v.is_array() && v.size() == 3) {
+                    if (v.is_array() && v.size() == 16) {
+                        // SKF 0019: full row-major 4x4 from python
+                        Imath::M44f m;
+                        for (int r = 0; r < 4; ++r)
+                            for (int c = 0; c < 4; ++c)
+                                m[r][c] = v[r * 4 + c].get<float>();
+                        result->image_transforms_.push_back(m);
+                    } else if (v.is_array() && v.size() == 7) {
+                        // SKF 0019: (tx, ty, sx, sy, rotate_degrees, flipH, flipV) —
+                        // everything a conform reposition needs: scale/flip, then
+                        // rotate, then translate (in normalised image space)
+                        const float tx = v[0].get<float>(), ty = v[1].get<float>();
+                        const float sx = v[2].get<float>(), sy = v[3].get<float>();
+                        const float rot = v[4].get<float>() * 3.14159265358979f / 180.0f;
+                        const float fh = v[5].get<bool>() ? -1.0f : 1.0f;
+                        const float fv = v[6].get<bool>() ? -1.0f : 1.0f;
+                        Imath::M44f m;
+                        m.translate(Imath::V3f(tx, ty, 0.0f));
+                        m.rotate(Imath::V3f(0.0f, 0.0f, rot));
+                        m.scale(Imath::V3f(sx * fh, sy * fv, 1.0f));
+                        result->image_transforms_.push_back(m);
+                    } else if (v.is_array() && v.size() == 3) {
                         float tx = v[0].get<float>();
                         float ty = v[1].get<float>();
                         float s  = v[2].get<float>();

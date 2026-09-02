@@ -293,6 +293,11 @@ void ImageBufDisplaySet::finalise() {
             r["image_size_in_pixels"] = im->image_size_in_pixels();
             // r["image_pixels_bounding_box"] = im->image_pixels_bounding_box();
             r["pixel_aspect"] = im.frame_id().pixel_aspect();
+            // SKF 0019: identity of what is on screen, so a layout plugin can
+            // apply PER-CLIP transforms (conform repositions).
+            r["clip_uuid"]   = to_string(im.frame_id().clip_uuid());
+            r["media_uuid"]  = to_string(im.frame_id().media_uuid());
+            r["source_uuid"] = to_string(im.frame_id().source_uuid());
             images_hash_ += im.frame_id().key().hash();
         }
         image_info.push_back(r);
