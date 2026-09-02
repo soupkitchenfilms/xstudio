@@ -294,15 +294,24 @@ void py_context::erase_func(py::function &callback_func) {
 void py_context::execute_event_callback(
     const caf::message &msg, const xstudio::utility::Uuid &callback_id) {
 
-    auto p = message_callback_funcs_.find(callback_id);
-    if (p == message_callback_funcs_.end())
-        return;
-    auto &callback_func = p->second;
-
     try {
 
         // acquire the GIL!
         py::gil_scoped_acquire gil;
+
+        // SKF 0017: look the callback up UNDER the map mutex, after the GIL
+        // (register/remove run on Python threads that already hold the GIL
+        // and take the same mutex, so the order GIL -> mutex is consistent).
+        // The old lookup ran on the scheduler thread before the GIL with no
+        // lock at all, racing every register/remove.
+        py::function callback_func;
+        {
+            std::lock_guard<std::mutex> lk(message_callback_mutex_);
+            auto p = message_callback_funcs_.find(callback_id);
+            if (p == message_callback_funcs_.end())
+                return;
+            callback_func = p->second;
+        }
 
         // build our CAF message data into a python tuple
         py::tuple result(msg.size());
@@ -558,13 +567,23 @@ xstudio::utility::Uuid py_context::py_add_message_callback(const py::args &xs) {
         // spawn a listener actor to receive the event messages. THis will
         // run the Python callback (after acquiring the GIL)
         if (!message_callback_handler_actor_) {
+            // SKF 0017: DETACHED. Every Python plugin callback (menu clicks,
+            // hotkeys, attribute events) runs serially on this actor. As a
+            // scheduled actor it shared the 128-thread pool with the media
+            // readers, which decode EXR inline: a read-ahead storm left this
+            // mailbox unserviced for tens of seconds while the native UI
+            // stayed fluid (upstream #332) — clicks then fired late, against
+            // whatever was selected by then. A detached actor owns a thread.
             message_callback_handler_actor_ =
-                self_->spawn<EventToPythonThreadLockerActor>(this);
+                self_->spawn<EventToPythonThreadLockerActor, caf::detached>(this);
         }
 
         // here we store the python function object - the callback in the Python
         // code
-        message_callback_funcs_[uuid] = callback_func;
+        {
+            std::lock_guard<std::mutex> lk(message_callback_mutex_);
+            message_callback_funcs_[uuid] = callback_func;
+        }
 
         // here we message our 'watcher'. It will join the event group of
         // the 'remote_actor' and when it gets event messages from that actor
@@ -584,10 +603,16 @@ void py_context::py_remove_message_callback(const xstudio::utility::Uuid &id) {
     if (message_callback_handler_actor_) {
         anon_mail(id).send(message_callback_handler_actor_);
     }
-    auto p = message_callback_funcs_.find(id);
-    if (p != message_callback_funcs_.end()) {
-        message_callback_funcs_.erase(p);
-    } else {
+    bool found = false;
+    {
+        std::lock_guard<std::mutex> lk(message_callback_mutex_);
+        auto p = message_callback_funcs_.find(id);
+        if (p != message_callback_funcs_.end()) {
+            message_callback_funcs_.erase(p);
+            found = true;
+        }
+    }
+    if (!found) {
         throw std::runtime_error(
             "py_remove_message_callback - callback handler ID not recognised.");
     }

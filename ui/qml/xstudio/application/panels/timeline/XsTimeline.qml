@@ -1712,7 +1712,10 @@ Rectangle {
                     // middle-drag pans the timeline, same as hold-key scrolling mode
                     if(pressed) {
                         isScrolling = true
-                        initialValue = list_view.itemAtIndex(0).currentPosition()
+                        // SKF 0017: same guard 0006 gives jumpToFrame — an
+                        // empty timeline has no item 0
+                        initialValue = list_view.itemAtIndex(0)
+                            ? list_view.itemAtIndex(0).currentPosition() : 0
                         initialPosition = Qt.point(mouseX, mouseY)
                     }
                 } else if(button == Qt.RightButton) {
