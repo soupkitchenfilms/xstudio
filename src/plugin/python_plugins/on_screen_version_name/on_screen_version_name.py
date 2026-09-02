@@ -9,6 +9,26 @@ from xstudio.core import HUDElementPosition, ColourTriplet
 from xstudio.api.session.media import Media, MediaSource
 
 import json
+import os
+import re
+from urllib.parse import unquote, urlparse
+
+# ".{:04d}.exr" / ".####.exr" / ".%04d.exr" / ".1001.exr" frame token + extension
+_FRAME_TOKEN_RE = re.compile(r"\.(\{:0?\d*d\}|#+|%0?\d*d|\d+)\.[A-Za-z0-9]+$")
+
+
+def _media_path(media_item):
+    """POSIX path of the media's current image source pattern, or ''."""
+    try:
+        src = media_item.media_source()
+        mr = src.media_reference
+        uri = mr.uri() if callable(mr.uri) else mr.uri
+        part = str(uri)
+        if part.startswith("file:"):
+            part = unquote(urlparse(part).path)
+        return re.sub(r"^/+", "/", part)
+    except Exception:
+        return ""
 
 # path to QML resources relative to this .py file
 qml_folder_name = "qml/OnScreenVersionName.1"
@@ -99,7 +119,26 @@ class OnScreenVersionName(HUDPlugin):
             },
             register_as_preference=True
             )
-        self.hide_timeout.expose_in_ui_attrs_group("on_screen_version_name")
+        self.index_into_data.expose_in_ui_attrs_group("on_screen_version_name")
+
+        # SKF 0020: what to show. "Version (folder name)" = a sequence's parent
+        # directory, e.g. 127_DAR_0120_cmp_v014 (the pipeline's version
+        # identity) instead of the full path in the media-list column; single
+        # files (movies/stills) show their file stem. Old behaviour selectable.
+        self.display_mode = self.add_attribute(
+            "Display",
+            "Version (folder name)",
+            {
+                "combo_box_options": [
+                    "Version (folder name)",
+                    "File name (no frame/ext)",
+                    "Media List Column"]
+            },
+            register_as_preference=True
+            )
+        self.display_mode.expose_in_ui_attrs_group("on_screen_version_name")
+        self.display_mode.set_tool_tip("Version (folder name): the sequence's parent folder (single files show their name); File name: the file stem; Media List Column: the column chosen below")
+        self.display_mode.set_redraw_viewport_on_change(True)
 
         # this attr holds the actual text to be displayed on screen
         self.display_text = self.add_attribute(
@@ -112,6 +151,8 @@ class OnScreenVersionName(HUDPlugin):
         # the following calls mean that these attributes get controls in
         # the settings dialog for thie HUD, accessed via the cog icon next to
         # the item in the HUD pop-up menu
+        self.add_hud_settings_attribute(self.display_mode)
+        self.add_hud_settings_attribute(self.index_into_data)
         self.add_hud_settings_attribute(self.font_size)
         self.add_hud_settings_attribute(self.hide_timeout)
         self.add_hud_settings_attribute(self.auto_hide)
@@ -137,20 +178,37 @@ class OnScreenVersionName(HUDPlugin):
         # going on-screen. We use it to build data that we return which will
         # subsequently be available in the property 'media_item_hud_data'
         # in our QML item that draws the HUD graphics.
-        content = ""
+        if not media_item:
+            return ""
+        prefix = ""
+        if self.show_parent.value() and self.connection.api.session.viewed_container:
+            prefix = self.connection.api.session.viewed_container.name + " - "
+        return prefix + self._skf_label(media_item)
 
-        if media_item:
-            if self.show_parent.value() and self.connection.api.session.viewed_container:
-                content += self.connection.api.session.viewed_container.name + " - "
-
-            idx = self.index_into_data.value()
-            # display_info is an array of values corresponding to the columns
-            # of the Media List Panel in the xSTUDIO UI (the columns are fully
-            # user-configurable, by the way)
-            if idx < len(media_item.display_info):
-                content += media_item.display_info[idx]
-
-        return content
+    def _skf_label(self, media_item):
+        # SKF 0020: show the version folder (or file stem) instead of the
+        # full path; "Media List Column" keeps the stock behaviour.
+        mode = self.display_mode.value()
+        if mode != "Media List Column":
+            path = _media_path(media_item)
+            if path:
+                name = os.path.basename(path)
+                is_sequence = bool(_FRAME_TOKEN_RE.search(name))
+                if mode == "Version (folder name)" and is_sequence:
+                    folder = os.path.basename(os.path.dirname(path))
+                    if folder:
+                        return folder
+                stem = _FRAME_TOKEN_RE.sub("", name)
+                stem = re.sub(r"\.[A-Za-z0-9]+$", "", stem)
+                if stem:
+                    return stem
+        idx = self.index_into_data.value()
+        # display_info is an array of values corresponding to the columns
+        # of the Media List Panel in the xSTUDIO UI (the columns are fully
+        # user-configurable, by the way)
+        if idx < len(media_item.display_info):
+            return media_item.display_info[idx]
+        return ""
 
 
 # This method is required by xSTUDIO
