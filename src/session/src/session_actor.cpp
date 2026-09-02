@@ -2638,7 +2638,30 @@ void SessionActor::gather_media_sources_add_media(
                             mail(media::add_media_source_atom_v, deduped_sources)
                                 .request(media, infinite)
                                 .then(
-                                    [=](const bool) mutable { rp.deliver(deduped_sources); },
+                                    [=](const bool) mutable {
+                                        // SKF 0018: a media hook that gathered a
+                                        // source named "SSD" (a valid copy in the
+                                        // shared localise store) wants it current —
+                                        // the hook's preferred_source out-param is
+                                        // dropped on this path, so honour the name.
+                                        static const bool prefer_ssd = [] {
+                                            const char *e = getenv("XSTUDIO_SKF_PREFER_SSD");
+                                            return !(e && std::string(e) == "0");
+                                        }();
+                                        if (prefer_ssd) {
+                                            for (const auto &i : details) {
+                                                if (i.name_ == "SSD") {
+                                                    anon_mail(
+                                                        media::current_media_source_atom_v,
+                                                        i.uuid_,
+                                                        media::MT_IMAGE)
+                                                        .send(media);
+                                                    break;
+                                                }
+                                            }
+                                        }
+                                        rp.deliver(deduped_sources);
+                                    },
                                     [=](const caf::error &err) mutable {
                                         log_caf_error(err);
                                         rp.deliver(err);
