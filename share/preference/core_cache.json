@@ -13,9 +13,9 @@
 			},
 			"max_size": {
 				"path": "/core/image_cache/max_size",
-				"default_value": 4096,
+				"default_value": 16384,
 				"description": "This setting controls the maximum amount of your computer's RAM that xSTUDIO will use to store video frames during playback. A higher number means more memory is used but this will allow xSTUDIO to keep de-coded frames ready for immediate display.",
-				"value": 4096,
+				"value": 16384,
 				"datatype": "int",
 				"context": ["APPLICATION","SESSION"],
 				"category": "General",
