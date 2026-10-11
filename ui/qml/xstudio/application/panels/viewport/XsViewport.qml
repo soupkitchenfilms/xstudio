@@ -85,6 +85,37 @@ Viewport {
         componentName: "Media List"
     }
 
+    // SKF: W toggles the Wipe compare mode, as in Nuke and Fred. Turning it
+    // off restores whichever compare mode was active before.
+    XsHotkey {
+        id: toggle_wipe_hotkey
+        sequence: "W"
+        name: "Toggle Wipe Compare"
+        description: "Switches the viewer compare mode to Wipe, or back to the previous mode."
+        context: view.name
+        onActivated: {
+            if (compare_mode == "Wipe") {
+                compare_mode = pre_wipe_compare_mode
+            } else {
+                pre_wipe_compare_mode = compare_mode ? compare_mode : "Off"
+                compare_mode = "Wipe"
+            }
+        }
+    }
+    property string pre_wipe_compare_mode: "Off"
+
+    XsModuleData {
+        id: viewport_toolbar_data
+        modelDataName: view.name + "_toolbar"
+    }
+
+    XsAttributeValue {
+        id: __compare_mode
+        attributeTitle: "Compare"
+        model: viewport_toolbar_data
+    }
+    property alias compare_mode: __compare_mode.value
+
     property alias hide_ui_hotkey: hide_ui_hotkey
 
     onPointerEntered: {
