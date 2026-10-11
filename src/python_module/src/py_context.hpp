@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 #pragma once
 
+#include <deque>
 #include <mutex>
 #include <caf/all.hpp>
 #include <caf/config.hpp>
@@ -49,6 +50,8 @@ class py_context : public py_config {
     void erase_func(py::function &callback_func);
 
     void py_wait_for_xstudio_exit();
+    void stash_pending(mailbox_element_ptr ptr);  // SKF 0016
+    mailbox_element_ptr take_pending();           // SKF 0016
     py::tuple py_dequeue();
     py::tuple py_dequeue_with_timeout(xstudio::utility::absolute_receive_timeout timeout);
     xstudio::utility::Uuid py_add_message_callback(const py::args &xs);
@@ -112,6 +115,9 @@ class py_context : public py_config {
     caf::actor message_callback_handler_actor_;
     std::map<xstudio::utility::Uuid, py::function> message_callback_funcs_;
     std::mutex message_callback_mutex_;   // SKF 0017: guards the map above
+    // SKF 0016: non-response messages that arrived during a py_request wait;
+    // drained first by py_dequeue*. Guarded by the Python link lock.
+    std::deque<mailbox_element_ptr> pending_;
     std::map<xstudio::utility::Uuid, py::object> plugin_registry_;
 };
 } // namespace caf::python
