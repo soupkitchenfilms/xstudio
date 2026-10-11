@@ -51,6 +51,7 @@ struct ShowRule {
     std::regex shot_re;
     std::string ocio_comp;
     std::string ocio_encode;
+    std::string ocio_view;   // review view for scene-linear media -> automatic_view
 };
 
 struct Config {
@@ -100,6 +101,7 @@ const Config &config() {
             if (s.contains("ocio")) {
                 r.ocio_comp   = s["ocio"].value("comp", "");
                 r.ocio_encode = s["ocio"].value("encode", "");
+                r.ocio_view   = s["ocio"].value("view", "");
             }
             fresh.shows.push_back(std::move(r));
         }
@@ -245,6 +247,10 @@ class SKFMediaHook : public MediaHook {
         } else {
             block["working_space"]    = "scene_linear";
             block["input_colorspace"] = "ACEScg:ACES - ACEScg:scene_linear";
+            // Config default view can be Raw (H4 ACES 2.0: default display
+            // is OCN) -- stamp the show's review view as the automatic view.
+            if (show && !show->ocio_view.empty())
+                block["automatic_view"] = show->ocio_view;
         }
         result["colour_pipeline"] = block;
         if (show) {
