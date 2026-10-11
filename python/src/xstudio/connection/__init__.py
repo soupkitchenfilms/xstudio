@@ -16,8 +16,66 @@ import uuid
 import time
 import os
 import traceback
+from collections import deque
 from pathlib import Path
-from threading import Thread
+from threading import Thread, Lock, Event, get_ident
+
+
+class _FairLock(object):
+    """SKF 0016: FIFO-fair re-entrant lock serialising link traffic.
+
+    The Link wraps a single CAF scoped_actor which is not thread-safe, and
+    since #347 Link.request() blocks inline for its own response on that
+    shared mailbox. The C++ side releases the GIL while it waits (so other
+    Python threads keep running), which is only safe if one thread at a time
+    is inside the link — hence this lock around every mailbox call. A plain
+    threading.Lock allows barging: an API-heavy worker re-acquiring in a loop
+    can starve menu/hotkey callbacks. Waiters here are served in arrival order.
+    """
+
+    def __init__(self):
+        self._mutex = Lock()
+        self._waiters = deque()
+        self._owner = None
+        self._depth = 0
+
+    def acquire(self):
+        me = get_ident()
+        with self._mutex:
+            if self._owner == me:
+                self._depth += 1
+                return
+            if self._owner is None and not self._waiters:
+                self._owner = me
+                self._depth = 1
+                return
+            ev = Event()
+            self._waiters.append((me, ev))
+        ev.wait()
+
+    def release(self):
+        with self._mutex:
+            if self._owner != get_ident():
+                return
+            self._depth -= 1
+            if self._depth:
+                return
+            if self._waiters:
+                # hand ownership straight to the longest waiter — no window
+                # for the releasing thread to barge back in
+                who, ev = self._waiters.popleft()
+                self._owner = who
+                self._depth = 1
+                ev.set()
+            else:
+                self._owner = None
+
+    def __enter__(self):
+        self.acquire()
+        return self
+
+    def __exit__(self, *exc):
+        self.release()
 
 class Connection(object):
     """Handle connection to xstudio."""
@@ -33,6 +91,8 @@ class Connection(object):
            debug (bool): Output debug information.
         """
         self.link = Link()
+        # SKF 0016: serialises all mailbox traffic across threads
+        self.link_lock = _FairLock()
         self.connected = False
         self.app_type = None
         self.app_version = None
@@ -389,7 +449,11 @@ class Connection(object):
 
     def request_receive_timeout(self, timeout_milli, *args):
         """Send message and return response."""
-        return self.link.request(timeout_milli, *args)
+        # SKF 0016: one thread in the link at a time; the C++ request releases
+        # the GIL while it waits, so other threads still run (they queue here
+        # only if they also need the link).
+        with self.link_lock:
+            return self.link.request(timeout_milli, *args)
 
     def spawn(self, *args):
         """Spawn remote actor
@@ -400,7 +464,8 @@ class Connection(object):
         result = None
 
         if self.connected:
-            result = self.link.spawn(*args)
+            with self.link_lock:
+                result = self.link.spawn(*args)
 
         return result
 
@@ -413,7 +478,8 @@ class Connection(object):
         result = None
 
         if self.connected:
-            result = self.link.remote_spawn(*args)
+            with self.link_lock:
+                result = self.link.remote_spawn(*args)
 
         return result
 
@@ -424,13 +490,17 @@ class Connection(object):
            args (args): Arguments to send.
         """
         if self.connected:
-            self.link.send(*args)
+            with self.link_lock:
+                self.link.send(*args)
 
     def dequeue_messages(self, timeout=10):
         """Pop waiting messages"""
         while True:
             try:
-                self._dequeue_messages(timeout)
+                # SKF 0016: lock per iteration so request threads interleave
+                # fairly with a background event pump
+                with self.link_lock:
+                    self._dequeue_messages(timeout)
             except (TimeoutError, SystemError) as e:
                 break
             except TimeoutError as e:

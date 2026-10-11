@@ -354,89 +354,94 @@ void py_context::execute_event_callback(
 #pragma GCC diagnostic ignored "-Wdeprecated-declarations"
 #endif
 
-static std::mutex mmm;
-
 py::tuple py_context::py_request(const py::args &xs) {
 
-    // this is called from Connection Python class
+    // this is called from Connection Python class.
+    //
+    // SKF 0016 (rebased onto upstream's inline request/response, #347):
+    // the Python Connection holds its FIFO-fair link lock for the whole call,
+    // so only ONE thread ever touches self_ (a non-thread-safe scoped_actor)
+    // at a time. That is what makes it safe to RELEASE THE GIL while we block
+    // in await_data below. Holding the GIL here (upstream) freezes every
+    // other Python thread in the process for the duration of any request —
+    // in the embedded interpreter that serialises menu/hotkey callbacks
+    // behind background API traffic, and they fire late against a stale
+    // selection. (Upstream's note about lock-ups when re-acquiring the GIL is
+    // the unserialised case: two threads racing self_.)
+    //
+    // Non-response messages that arrive while we wait (broadcasts, events
+    // the Connection has joined) are STASHED for py_dequeue*, not dropped.
+    // Stale responses (to requests that already timed out) are discarded.
 
-    py::tuple result;
     if (xs.size() < 2) {
         set_py_exception("Too few arguments to call CAF.request");
-        return result;
+        return py::tuple{};
     }
-    auto i    = xs.begin();
+    auto i                    = xs.begin();
     auto timeout_milliseconds = (*i).cast<int64_t>();
     ++i;
     auto dest = (*i).cast<actor>();
     auto msg  = py_build_message(xs, 2);
 
-    if (msg) {
+    if (!msg)
+        return py::tuple{};
 
-        // send the request - this gives us a message id which we use to
-        // retrieve the result from the mailbox.
+    // send the request - this gives us a message id which we use to
+    // retrieve the result from the mailbox.
+    auto reqhan       = self_->request(dest, caf::infinite, *msg);
+    const auto wanted = reqhan.id().request_id().integer_value();
 
-        // Note: the GIL is held here, so as far as I know it's impossible for
-        // another request to be made before we get the result that we are
-        // looking for (in other words messages coming in out-of-order or 
-        // other async issues should not trouble us)
-        auto reqhan = self_->request(dest, caf::infinite, *msg);
-
-        if (self_->has_next_message()) {
-            // Not sure if we'll ever get the message back here but just in case
-            mailbox_element_ptr ptr = self_->next_message();
-            if (ptr) {
-                if (ptr->mid.request_id().integer_value() == reqhan.id().request_id().integer_value()) {
-                    if (ptr->content().match_element<caf::error>(0)) {
-                        set_py_exception(to_string(ptr->content().get_as<caf::error>(0)));
-                        return py::tuple{}; 
-                    }
-                    return tuple_from_message(ptr->mid, ptr->sender, std::move(ptr->content()));
-                }
+    mailbox_element_ptr found = nullptr;
+    {
+        py::gil_scoped_release release;
+        const auto deadline = std::chrono::high_resolution_clock::now() +
+                              std::chrono::milliseconds(timeout_milliseconds);
+        while (!found) {
+            mailbox_element_ptr ptr = nullptr;
+            if (self_->has_next_message()) {
+                ptr = self_->next_message();
+            } else {
+                if (!self_->await_data(deadline))
+                    break; // timed out
+                ptr = self_->next_message();
             }
-        }
-
-        // loop here until we time-out or we get the result we're looking for.
-        while (1) {
-
-            auto t0 = std::chrono::high_resolution_clock::now();
-            auto to = t0 + std::chrono::milliseconds(timeout_milliseconds);
-            {
-                // Note: I have tried releasing the GIL here, so that other 
-                // python threads can proceed. However, sometimes we get a 
-                // lockup when  the scoped release goes of our scope and it 
-                // tries to re-acquire the GIL - not been able to resolve this
-                // so far.
-                // py::gil_scoped_release release;        
-
-                // blocking wait with timeout
-                if (!self_->await_data(to)) {
-                    set_py_exception(R"(Dequeue timeout)");
-                    return py::tuple{};
-                }
-
-            }
-            mailbox_element_ptr ptr = self_->next_message();
-            if (ptr) {
-                if (ptr->mid.request_id().integer_value() == reqhan.id().request_id().integer_value()) {
-                    if (ptr->content().match_element<caf::error>(0)) {
-                        set_py_exception(to_string(ptr->content().get_as<caf::error>(0)));
-                        return py::tuple{}; 
-                    }
-                    return tuple_from_message(ptr->mid, ptr->sender, std::move(ptr->content()));
-                } else {
-                    //std::cerr << "Missed message " << to_string(ptr->content()) << "\n";
-                }
-            }
-
-            timeout_milliseconds -= std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::high_resolution_clock::now()-t0).count();
-            if (timeout_milliseconds < 0) {
-                set_py_exception(R"(Dequeue timeout)");
-                return py::tuple{};
+            if (!ptr)
+                continue;
+            if (ptr->mid.is_response()) {
+                if (ptr->mid.request_id().integer_value() == wanted)
+                    found = std::move(ptr);
+                // else: a late reply to a request that already timed out
+            } else {
+                stash_pending(std::move(ptr));
             }
         }
     }
-    return py::tuple{};
+
+    if (!found) {
+        set_py_exception(R"(Dequeue timeout)");
+        return py::tuple{};
+    }
+    if (found->content().match_element<caf::error>(0)) {
+        set_py_exception(to_string(found->content().get_as<caf::error>(0)));
+        return py::tuple{};
+    }
+    return tuple_from_message(found->mid, found->sender, std::move(found->content()));
+}
+
+void py_context::stash_pending(mailbox_element_ptr ptr) {
+    // bounded: a Connection that never dequeues must not grow this forever
+    static constexpr size_t max_pending = 10000;
+    if (pending_.size() >= max_pending)
+        pending_.pop_front();
+    pending_.push_back(std::move(ptr));
+}
+
+mailbox_element_ptr py_context::take_pending() {
+    if (pending_.empty())
+        return nullptr;
+    mailbox_element_ptr ptr = std::move(pending_.front());
+    pending_.pop_front();
+    return ptr;
 }
 
 void py_context::py_wait_for_xstudio_exit() {
@@ -511,38 +516,47 @@ py::tuple py_context::tuple_from_message(
 }
 
 py::tuple py_context::py_dequeue() {
-    mailbox_element_ptr ptr = nullptr;
+    mailbox_element_ptr ptr = take_pending();
 
-    if (self_->has_next_message())
-        ptr = self_->next_message();
+    if (!ptr) {
+        // SKF 0016: blocking mailbox waits must NOT hold the GIL (see
+        // py_request). Mailbox access is serialised by the Python-side
+        // Connection link lock.
+        py::gil_scoped_release release;
 
-    while (!ptr) {
-        self_->await_data();
-        ptr = self_->next_message();
+        if (self_->has_next_message())
+            ptr = self_->next_message();
+
+        while (!ptr) {
+            self_->await_data();
+            ptr = self_->next_message();
+        }
     }
     return tuple_from_message(ptr->mid, ptr->sender, std::move(ptr->content()));
 }
 
 py::tuple
 py_context::py_dequeue_with_timeout(xstudio::utility::absolute_receive_timeout timeout) {
-    mailbox_element_ptr ptr = nullptr;
+    mailbox_element_ptr ptr = take_pending();
 
-    {
-        //py::gil_scoped_release release;
+    if (!ptr) {
+        // SKF 0016: see py_dequeue — never hold the GIL while blocked.
+        py::gil_scoped_release release;
 
         if (self_->has_next_message()) {
-            // std::cout << "has message already" << std::endl;
             ptr = self_->next_message();
         }
 
         while (!ptr) {
-            if (!self_->await_data(timeout.value())) {
-                set_py_exception(R"(Dequeue timeout)");
-                return py::tuple{};
-            }
-            // std::cout << "got message" << std::endl;
+            if (!self_->await_data(timeout.value()))
+                break;
             ptr = self_->next_message();
         }
+    }
+
+    if (!ptr) {
+        set_py_exception(R"(Dequeue timeout)");
+        return py::tuple{};
     }
     return tuple_from_message(ptr->mid, ptr->sender, std::move(ptr->content()));
 }
