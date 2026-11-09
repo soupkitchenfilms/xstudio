@@ -43,5 +43,7 @@ class KeypressMonitor : public caf::event_based_actor {
     caf::actor actor_grabbing_all_keyboard_input_;
     utility::JsonStore hotkey_overrides_;
     bool overrides_changed_ = false;
+    // SKF 0023: where the last real key event came from, for hotkeys fired by name.
+    std::string last_key_context_, last_key_window_;
 };
 } // namespace xstudio::ui::keypress_monitor

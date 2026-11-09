@@ -81,6 +81,8 @@ KeypressMonitor::KeypressMonitor(caf::actor_config &cfg) : caf::event_based_acto
             if (Hotkey::key_names.find(key) == Hotkey::key_names.end()) {
                 extra_key_names_[key] = key_text;
             }
+            last_key_context_ = context;
+            last_key_window_  = window;
 
             if (actor_grabbing_all_keyboard_input_) {
                 anon_mail(key_down_atom_v, key, context, auto_repeat)
@@ -323,6 +325,34 @@ KeypressMonitor::KeypressMonitor(caf::actor_config &cfg) : caf::event_based_acto
                     return p->second;
                 }
                 p++;
+            }
+            return make_error(
+                xstudio_error::error, "Invalid hotkey name '" + hotkey_name + "'");
+        },
+
+        // SKF 0023: fire a hotkey by name, as if its keys went down and came up
+        // (the same held-keys path a real key event takes, in the context / window
+        // of the last real key event). For remote controls (Stream Deck) where
+        // injecting keystrokes is not possible (Wayland) or not wanted. Ignored
+        // while an actor grabs all keyboard input, as a real key would be.
+        [=](hotkey_atom, const std::string &hotkey_name, const bool fire) -> result<bool> {
+            for (const auto &p : active_hotkeys_) {
+                if (p.second.hotkey_name() != hotkey_name)
+                    continue;
+                if (!fire)
+                    return false;
+                std::set<int> keys;
+                for (const auto &m : Hotkey::key_to_modifier)
+                    if ((p.second.modifiers() & m.second) == m.second)
+                        keys.insert(m.first);
+                keys.insert(p.second.key_id());
+                const auto saved = held_keys_;
+                held_keys_       = keys;
+                held_keys_changed(last_key_context_, false, last_key_window_);
+                held_keys_.clear();
+                held_keys_changed(last_key_context_, false, last_key_window_);
+                held_keys_ = saved;
+                return true;
             }
             return make_error(
                 xstudio_error::error, "Invalid hotkey name '" + hotkey_name + "'");

@@ -110,6 +110,17 @@ class API(CommonAPI):
             self.connection.request_receive(self.connection.remote(), get_actor_from_registry_atom(), name)[0]
         )
 
+    def trigger_hotkey(self, name):
+        """Fire a hotkey by its name, as if its keys were pressed and released (SKF 0023).
+
+        Args:
+            name(str): Hotkey name, as listed in the Hotkeys dialog (e.g. "Version Up").
+        Returns:
+            fired(bool): True when the hotkey exists and was fired."""
+        from xstudio.core import hotkey_atom
+        kb = self.connection.request_receive(self.connection.remote(), get_actor_from_registry_atom(), "KEYBOARDEVENTS")[0]
+        return self.connection.request_receive(kb, hotkey_atom(), name, True)[0]
+
 
     def log(self, level, messge):
         """Log msg at level

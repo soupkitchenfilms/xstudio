@@ -398,6 +398,7 @@ void py_config::add_atoms() {
     ADD_ATOM(xstudio::ui, open_quickview_window_atom);
 
     ADD_ATOM(xstudio::ui::keypress_monitor, register_hotkey_atom);
+    ADD_ATOM(xstudio::ui::keypress_monitor, hotkey_atom); // SKF 0023
     ADD_ATOM(xstudio::ui::keypress_monitor, hotkey_event_atom);
 
     ADD_ATOM(xstudio::ui::model_data, menu_node_activated_atom);
