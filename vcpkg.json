@@ -73,7 +73,7 @@
     },
     {
       "name": "freetype",
-      "version": "2.10.1-6#0"
+      "version": "2.13.3"
     },
     {
       "name": "boost-modular-build-helper",
