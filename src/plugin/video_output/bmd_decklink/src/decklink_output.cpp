@@ -6,6 +6,7 @@
 #include "xstudio/enums.hpp"
 #include <iostream>
 #include <half.h>
+#include <thread>
 
 #ifdef __linux__
 #include <dlfcn.h>
@@ -802,17 +803,42 @@ void DecklinkOutput::fill_decklink_video_frame(IDeckLinkVideoFrame *decklink_vid
     if (video_buffer)
         video_buffer->Release();
 
-    if (decklink_output_interface_->ScheduleVideoFrame(
-            decklink_video_frame,
-            (uiTotalFrames * frame_duration_),
-            frame_duration_,
-            frame_timescale_) != S_OK) {
+    // The driver pins every frame for DMA as it is scheduled, which needs a small
+    // contiguous kernel allocation. When memory is fragmented (heavy caching while
+    // jumping between sequences) that can fail for a moment: the kernel logs
+    // "page allocation failure: order:4" in blackmagic_io. One failure used to stop
+    // the output for good, so retry a few times, moving the frame one output slot
+    // later each time (a dropped frame), and only stop when every attempt fails.
+    constexpr int schedule_attempts = 5;
+    int attempts                    = 0;
+    bool scheduled                  = false;
+    while (!scheduled && attempts < schedule_attempts) {
+        if (attempts) {
+            std::this_thread::sleep_for(std::chrono::milliseconds(2));
+            uiTotalFrames++;
+        }
+        attempts++;
+        scheduled = decklink_output_interface_->ScheduleVideoFrame(
+                        decklink_video_frame,
+                        (uiTotalFrames * frame_duration_),
+                        frame_duration_,
+                        frame_timescale_) == S_OK;
+    }
+
+    if (!scheduled) {
         mutex_.unlock();
         running_ = false;
         decklink_xstudio_plugin_->stop();
-        report_error("Failed to schedule video frame.");
+        report_error(
+            fmt::format("Failed to schedule video frame ({} attempts).", schedule_attempts));
         return;
     }
+
+    if (attempts > 1)
+        spdlog::warn(
+            "Decklink: frame scheduled after {} attempts ({} frame(s) dropped).",
+            attempts,
+            attempts - 1);
 
     if (!running_) {
         running_ = true;
