@@ -621,6 +621,10 @@ void OffscreenViewport::initGL() {
         // into the viewport
         render_control_ = new QQuickRenderControl();
         quick_win_      = new QQuickWindow(render_control_);
+        // SKF 0027: Qt >= 6.6 makes our context current on a fallback surface built
+        // from the window's format; it must match the context (depth/alpha) or
+        // NVIDIA GLX refuses the makeCurrent and QRhi init fails.
+        quick_win_->setFormat(format);
         qml_engine_     = new QQmlEngine;
         if (!qml_engine_->incubationController())
             qml_engine_->setIncubationController(quick_win_->incubationController());
@@ -1073,7 +1077,16 @@ bool OffscreenViewport::loadQMLOverlays() {
 
     quick_win_->setGraphicsDevice(QQuickGraphicsDevice::fromOpenGLContext(gl_context_));
 
-    render_control_->initialize();
+    if (!render_control_->initialize()) {
+        // SKF 0027: no QRhi -> rendering the overlays would segfault in sync().
+        // Drop them and keep rendering the plain image.
+        qWarning("OffscreenViewport: QQuickRenderControl init failed, rendering without "
+                 "QML overlays");
+        root_qml_overlays_item_->setParentItem(nullptr);
+        root_qml_overlays_item_->deleteLater();
+        root_qml_overlays_item_ = nullptr;
+        return false;
+    }
 
     root_qml_overlays_item_->setProperty(
         "name", qml::QStringFromStd(xstudio_viewport_->name()));
