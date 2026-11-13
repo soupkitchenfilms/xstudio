@@ -13,7 +13,7 @@ ApplicationWindow {
 
     id: appWindow
     visible: false
-    color: "#00000000"
+    color: "black"  // opaque: a transparent window makes an ARGB surface and composite alpha shows the desktop through
     title: (viewedMediaSetProperties.values.nameRole ? viewedMediaSetProperties.values.nameRole + " - " : "") + fileName
     objectName: "xstudio_popout_window"
     minimumWidth: 150

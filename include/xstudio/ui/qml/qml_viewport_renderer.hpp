@@ -103,7 +103,6 @@ class VIEWPORT_QML_EXPORT QMLViewportRenderer : public QMLActor {
     void translationChanged();
     void resolutionsChanged();
     void doRedraw();
-    void doSnapshot(QString, QString, int, int, bool);
     void quickViewBackendRequest(QStringList mediaActors, QString compareMode);
     void quickViewBackendRequestWithSize(
         QStringList mediaActors, QString compareMode, QPoint position, QSize size);

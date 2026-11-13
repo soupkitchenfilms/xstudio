@@ -224,6 +224,8 @@ void QMLViewport::handleWindowChanged(QQuickWindow *win) {
 }
 
 void QMLViewport::handleScreenChanged(QScreen *screen) {
+    if (!screen) // a monitor unplugged / powered off can report no screen
+        return;
 
     spdlog::debug("QMLViewport::handleScreenChanged");
     if (renderer_actor)

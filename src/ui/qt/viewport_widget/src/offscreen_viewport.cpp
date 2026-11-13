@@ -869,7 +869,14 @@ void OffscreenViewport::exportToCompressedFormat(
     }
 
     if (path.empty()) {
-        QApplication::clipboard()->setImage(im, QClipboard::Clipboard);
+        // This runs on the offscreen viewport's own thread, and QClipboard is
+        // GUI-thread only: QtWayland creates the wl_data_source with no
+        // thread check (crash or hang). Queue it to the GUI thread; it runs
+        // once the blocked caller there returns.
+        QMetaObject::invokeMethod(
+            qApp,
+            [im]() { QGuiApplication::clipboard()->setImage(im, QClipboard::Clipboard); },
+            Qt::QueuedConnection);
         return;
     }
 

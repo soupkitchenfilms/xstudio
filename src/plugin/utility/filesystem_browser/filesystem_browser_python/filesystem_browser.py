@@ -21,14 +21,6 @@ class HostApp(Enum):
 
 HOST_APP = HostApp.xstudio
 
-# Try importing fileseq
-try:
-    import fileseq
-    fileseq_available = True
-except ImportError:
-    fileseq_available = False
-    _dbg("Warning: fileseq module not found. Sequence detection will be disabled.")
-
 # File-based debug log (more reliable than _dbg in xStudio's embedded Python)
 _DEBUG_LOG = "/{}/xstudio_thumb_debug.txt".format(os.environ.get("TMPDIR", "/tmp").rstrip("/"))
 def _dbg(*msg):
@@ -39,6 +31,14 @@ def _dbg(*msg):
             _f.flush()
     except Exception:
         pass
+
+# Try importing fileseq
+try:
+    import fileseq
+    fileseq_available = True
+except ImportError:
+    fileseq_available = False
+    _dbg("Warning: fileseq module not found. Sequence detection will be disabled.")
 
 def get_windows_drives():
     """Return a list of available drive letters on Windows."""

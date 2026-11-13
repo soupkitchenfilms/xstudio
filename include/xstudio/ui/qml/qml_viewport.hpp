@@ -129,7 +129,6 @@ namespace qml {
 
         void imageBoundariesInViewportChanged();
         void imageResolutionsChanged();
-        void doSnapshot(QString, QString, int, int, bool);
         void nameChanged();
         void
         quickViewSource(QStringList mediaActors, QString compareMode, int in_pt, int out_pt);

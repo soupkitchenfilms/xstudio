@@ -10,8 +10,6 @@ import uuid as _uuid
 import atexit
 from collections import OrderedDict
 
-global _dgb
-
 # Try importing fileseq
 try:
     import fileseq

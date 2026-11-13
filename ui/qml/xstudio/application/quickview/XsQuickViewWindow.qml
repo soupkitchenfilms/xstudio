@@ -13,7 +13,7 @@ Window {
 
     id: appWindow
     visible: true
-    color: "#00000000"
+    color: "black"  // opaque: a transparent window makes an ARGB surface and composite alpha shows the desktop through
     title: "xSTUDIO QuickView - "+fileName
     objectName: "xstudio_quickview_window"
     minimumWidth: 150
