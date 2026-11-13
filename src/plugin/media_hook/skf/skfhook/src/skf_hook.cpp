@@ -28,6 +28,7 @@
 #include <cstdlib>
 #include <filesystem>
 #include <fstream>
+#include <memory>
 #include <mutex>
 #include <regex>
 #include <string>
@@ -52,12 +53,21 @@ struct ShowRule {
     std::string ocio_comp;
     std::string ocio_encode;
     std::string ocio_view;   // review view for scene-linear media -> automatic_view
+    // SKF 0028: per-show review settings (utils/show_ocio <- <show>/LUTS/show_ocio.json)
+    std::string ocio_review;  // xStudio-only show config, wins over comp/encode
+    std::string review_view;  // view when the show config is in use
+    std::string exr_input;    // input_colorspace candidates for EXRs
+    std::regex view_re;       // group 1 in the media's metadata names its view
+    bool has_view_re = false;
 };
 
 struct Config {
     std::string path;
     time_t mtime = 0;
     std::string base_ocio;
+    std::string studio_ocio;        // SKF 0028: stock studio config for every show without one
+    std::string studio_view;        // its view for scene-linear media (stock displays default to Raw)
+    std::string default_exr_input;  // EXRs that match no show
     std::vector<ShowRule> shows;
     std::vector<std::string> movie_exts, still_exts, stores;
     double mtime_tolerance = 2.0;
@@ -73,25 +83,35 @@ std::string config_path() {
 
 bool stat_of(const std::string &p, struct stat *st) { return ::stat(p.c_str(), st) == 0; }
 
+using ConfigPtr = std::shared_ptr<const Config>;
+
 // Static, mutex-guarded config (RodeoFX's lesson: per-show lookups must be
-// static or every media source pays the parse).
-const Config &config() {
-    static Config cfg;
+// static or every media source pays the parse). Callers get an immutable
+// SNAPSHOT: a re-read (the JSON's mtime changed) builds a new Config and
+// swaps the pointer, so a caller still holding the old one -- and the
+// ShowRule pointers into it -- stays valid until it lets go.
+ConfigPtr config() {
+    static ConfigPtr cfg;
+    static time_t bad_mtime = -1;   // a version that failed to parse: don't retry it per media
     static std::mutex mx;
     std::lock_guard<std::mutex> l(mx);
     const std::string path = config_path();
     struct stat st;
     const time_t mt = stat_of(path, &st) ? st.st_mtime : 0;
-    if (cfg.loaded && cfg.path == path && cfg.mtime == mt)
+    if (cfg && cfg->path == path && (cfg->mtime == mt || mt == bad_mtime))
         return cfg;
-    Config fresh;
+    auto fresh_ptr = std::make_shared<Config>();
+    Config &fresh  = *fresh_ptr;
     fresh.path  = path;
     fresh.mtime = mt;
     try {
         std::ifstream in(path);
         nlohmann::json j;
         in >> j;
-        fresh.base_ocio       = j.value("base_ocio", "");
+        fresh.base_ocio         = j.value("base_ocio", "");
+        fresh.studio_ocio       = j.value("studio_ocio", "");
+        fresh.studio_view       = j.value("studio_view", "");
+        fresh.default_exr_input = j.value("default_exr_input", "");
         fresh.mtime_tolerance = j.value("mtime_tolerance", 2.0);
         for (const auto &s : j.value("shows", nlohmann::json::array())) {
             ShowRule r;
@@ -102,6 +122,18 @@ const Config &config() {
                 r.ocio_comp   = s["ocio"].value("comp", "");
                 r.ocio_encode = s["ocio"].value("encode", "");
                 r.ocio_view   = s["ocio"].value("view", "");
+                r.ocio_review = s["ocio"].value("review", "");
+                r.review_view = s["ocio"].value("review_view", "");
+                r.exr_input   = s["ocio"].value("exr_input", "");
+                const std::string vre = s["ocio"].value("view_regex", "");
+                if (!vre.empty()) {
+                    try {
+                        r.view_re     = std::regex(vre, std::regex::ECMAScript);
+                        r.has_view_re = true;
+                    } catch (const std::regex_error &e) {
+                        spdlog::warn("SKF media hook: show {} view_regex '{}': {}", r.code, vre, e.what());
+                    }
+                }
             }
             fresh.shows.push_back(std::move(r));
         }
@@ -114,10 +146,17 @@ const Config &config() {
         fresh.loaded = true;
         spdlog::info("SKF media hook: config {} ({} shows)", path, fresh.shows.size());
     } catch (const std::exception &e) {
+        // e.g. caught mid-rewrite: keep the last good config rather than
+        // dropping every show's colour; the next mtime change re-reads.
+        if (cfg && cfg->path == path) {
+            spdlog::warn("SKF media hook: cannot read {}: {} (keeping previous config)", path, e.what());
+            bad_mtime = mt;
+            return cfg;
+        }
         spdlog::warn("SKF media hook: cannot read {}: {}", path, e.what());
         fresh.loaded = true;   // don't retry every media; mtime change re-reads
     }
-    cfg = std::move(fresh);
+    cfg = std::move(fresh_ptr);
     return cfg;
 }
 
@@ -127,22 +166,23 @@ std::string local_store() {
     static std::string store;
     static std::once_flag once;
     std::call_once(once, [] {
-        for (const auto &s : config().stores) {
+        const auto c = config();
+        for (const auto &s : c->stores) {
             struct stat st;
             if (stat_of(s, &st) && S_ISDIR(st.st_mode)) {
                 store = s;
                 break;
             }
         }
-        if (store.empty() && !config().stores.empty())
-            store = config().stores.back();
+        if (store.empty() && !c->stores.empty())
+            store = c->stores.back();
         spdlog::info("SKF media hook: localise store {}", store);
     });
     return store;
 }
 
-bool under_store(const std::string &path) {
-    for (const auto &s : config().stores)
+bool under_store(const Config &c, const std::string &path) {
+    for (const auto &s : c.stores)
         if (path.rfind(s + "/", 0) == 0)
             return true;
     return false;
@@ -153,8 +193,9 @@ std::string to_store(const std::string &nas_path) {
     return local_store() + "/_" + nas_path.substr(1);
 }
 
-const ShowRule *show_for(const std::string &basename, std::string *shot) {
-    for (const auto &r : config().shows) {
+// The returned pointer lives as long as the caller's snapshot `c`.
+const ShowRule *show_for(const Config &c, const std::string &basename, std::string *shot) {
+    for (const auto &r : c.shows) {
         std::smatch m;
         if (std::regex_search(basename, m, r.shot_re) && m.position(0) == 0) {
             if (shot)
@@ -178,13 +219,15 @@ bool has(const std::vector<std::string> &v, const std::string &s) {
 // OCIO config this HOST can load for the show: SKF_OCIO_MAX_PROFILE=2.4
 // (ocio24 build) prefers the comp config (ACES 2.0, matches Nuke 17);
 // builds without it keep the encode config (ACES 1.3, profile 2.2).
-std::string ocio_config_for(const ShowRule *show) {
+std::string ocio_config_for(const Config &c, const ShowRule *show) {
     double host_max = 2.2;
     if (const char *e = getenv("SKF_OCIO_MAX_PROFILE"); e && *e)
         host_max = atof(e);
-    const std::string base = config().base_ocio;
+    const std::string base = !c.studio_ocio.empty() ? c.studio_ocio : c.base_ocio;
     if (!show)
         return base;
+    if (!show->ocio_review.empty())
+        return show->ocio_review;
     if (host_max >= 2.4)
         return !show->ocio_comp.empty()     ? show->ocio_comp
                : !show->ocio_encode.empty() ? show->ocio_encode
@@ -192,6 +235,30 @@ std::string ocio_config_for(const ShowRule *show) {
     return !show->ocio_encode.empty() ? show->ocio_encode
            : !show->ocio_comp.empty() ? show->ocio_comp
                                       : base;
+}
+
+// First match of `re` (its group 1) in any string value of the metadata.
+// Searched per value, never over metadata.dump(): libstdc++ <regex> recurses
+// per character and can overflow the stack on a long input, so values
+// longer than kMaxValue (blobs, embedded XML) are skipped.
+bool find_in_strings(const nlohmann::json &j, const std::regex &re, std::string *out, int depth = 0) {
+    constexpr size_t kMaxValue = 1024;
+    if (depth > 16)
+        return false;
+    if (j.is_string()) {
+        const auto &v = j.get_ref<const std::string &>();
+        std::smatch m;
+        if (v.size() <= kMaxValue && std::regex_search(v, m, re) && m.size() > 1) {
+            *out = m.str(1);
+            return true;
+        }
+        return false;
+    }
+    if (j.is_object() || j.is_array())
+        for (const auto &v : j)
+            if (find_in_strings(v, re, out, depth + 1))
+                return true;
+    return false;
 }
 
 std::string frames_spec(const std::vector<int> &frames_in) {
@@ -228,11 +295,12 @@ class SKFMediaHook : public MediaHook {
             mr.container() or mr.uris().empty() ? mr.uri() : mr.uris()[0].first;
         const std::string path     = uri_to_posix_path(uri, false);
         const std::string basename = fs::path(path).filename().string();
+        const ConfigPtr snap = config();   // one snapshot for the whole call
+        const Config &c      = *snap;
         std::string shot;
-        const ShowRule *show = show_for(basename, &shot);
-        const std::string cfg = ocio_config_for(show);
+        const ShowRule *show  = show_for(c, basename, &shot);
+        const std::string cfg = ocio_config_for(c, show);
         const std::string ext = lower_ext(path);
-        const auto &c         = config();
 
         nlohmann::json block;
         block["ocio_config"] = cfg;
@@ -245,12 +313,26 @@ class SKFMediaHook : public MediaHook {
             block["override_view"]    = "Raw";
             block["input_colorspace"] = "Raw:Utility - Raw:raw";
         } else {
-            block["working_space"]    = "scene_linear";
-            block["input_colorspace"] = "ACEScg:ACES - ACEScg:scene_linear";
-            // Config default view can be Raw (H4 ACES 2.0: default display
-            // is OCN) -- stamp the show's review view as the automatic view.
-            if (show && !show->ocio_view.empty())
-                block["automatic_view"] = show->ocio_view;
+            block["working_space"] = "scene_linear";
+            // SKF 0028: the show's plate space (H4 ACEScg, every other show and
+            // unmatched media the studio default ACES2065-1); ACEScg only when
+            // the JSON predates both keys.
+            const std::string &exr_in = show && !show->exr_input.empty() ? show->exr_input
+                                                                         : c.default_exr_input;
+            block["input_colorspace"] =
+                !exr_in.empty() ? exr_in : std::string("ACEScg:ACES - ACEScg:scene_linear");
+            // Config default views can be Raw (H4 ACES 2.0: display OCN; the
+            // stock studio config: every display) -- stamp a view.
+            std::string view;
+            if (cfg == c.studio_ocio && !c.studio_ocio.empty()) {
+                view = c.studio_view;
+            } else if (show) {
+                view = !show->review_view.empty() ? show->review_view : show->ocio_view;
+                if (show->has_view_re)
+                    find_in_strings(metadata, show->view_re, &view);
+            }
+            if (!view.empty())
+                block["automatic_view"] = view;
         }
         result["colour_pipeline"] = block;
         if (show) {
@@ -271,12 +353,13 @@ class SKFMediaHook : public MediaHook {
         const std::string store = local_store();
         if (store.empty())
             return out;
-        const double tol = config().mtime_tolerance;
+        const ConfigPtr snap = config();
+        const double tol     = snap->mtime_tolerance;
         for (const auto &mr : refs) {
             const caf::uri &uri =
                 mr.container() or mr.uris().empty() ? mr.uri() : mr.uris()[0].first;
             const std::string path = uri_to_posix_path(uri, false);
-            if (path.rfind("/Volumes/", 0) != 0 || under_store(path))
+            if (path.rfind("/Volumes/", 0) != 0 || under_store(*snap, path))
                 continue;
             // every concrete file must have a fresh copy
             std::vector<int> frames;
