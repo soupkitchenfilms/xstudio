@@ -311,6 +311,10 @@ int execute_xstudio_ui(
     app.setApplicationVersion(PROJECT_VERSION);
     app.setApplicationName("xStudio");
     app.setWindowIcon(QIcon(":images/xstudio_logo_256_v1.svg"));
+    // Wayland app id / X11 WM_CLASS hint: without it the compositor sees the
+    // binary name (xstudio.bin), which matches no desktop entry (generic icon,
+    // cannot pin, window rules must name the binary).
+    app.setDesktopFileName("xstudio");
 
     // Check OpenGL capabilities before proceeding
     {
