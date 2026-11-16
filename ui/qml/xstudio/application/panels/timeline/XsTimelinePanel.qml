@@ -269,7 +269,9 @@ XsGradientRectangle {
         anchors.fill: parent
         hoverEnabled: true
         onClicked: {
-            if(!isPlayheadActive) {
+            // SKF 0031: with no timeline (a playlist on view) the click used to
+            // point the viewer at an invalid index and blank it
+            if(!isPlayheadActive && theTimeline.have_timeline) {
 
                 if (!multiTimelineMode) {
                     viewportCurrentMediaContainerIndex = theTimeline.timelineModel.rootIndex.parent

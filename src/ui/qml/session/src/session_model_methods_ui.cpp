@@ -1725,6 +1725,10 @@ void SessionModel::setViewportCurrentMediaContainerIndex(const QModelIndex &inde
 
     try {
 
+        // SKF 0031: an invalid index would clear the viewed container (blank viewer)
+        if (not index.isValid())
+            return;
+
         if (index != current_playhead_owner_index_) {
 
             auto cuuid  = UuidFromQUuid(index.data(actorUuidRole).toUuid());
